@@ -119,10 +119,16 @@ function buildSkillsBlock(skills) {
  * Hook Handler
  */
 const handler = async (event) => {
+  // 调试：输出所有事件
+  console.log(`[ISS Hook DEBUG] Received event: type=${event.type}, action=${event.action}`);
+  
   // 只处理 message:preprocessed 事件
   if (event.type !== 'message' || event.action !== 'preprocessed') {
+    console.log(`[ISS Hook DEBUG] Skipping event (not message:preprocessed)`);
     return;
   }
+  
+  console.log(`[ISS Hook DEBUG] Handling message:preprocessed event`);
 
   try {
     // 延迟初始化
@@ -134,14 +140,28 @@ const handler = async (event) => {
     }
 
     // 提取用户消息
-    const userQuery = event.context?.bodyForAgent || event.context?.body || '';
+    let userQuery = event.context?.bodyForAgent || event.context?.body || '';
+    
+    console.log(`[ISS Hook DEBUG] Original userQuery = "${userQuery.substring(0, 100)}..."`);
+    
+    // 解析 OpenClaw 的消息格式：[message_id: xxx]\nou_xxx: 实际内容
+    // 提取最后一行的实际消息内容
+    if (userQuery.includes('\n')) {
+      const lines = userQuery.split('\n');
+      // 找到包含 "ou_xxx:" 的行
+      const senderLine = lines.find(line => line.match(/^ou_[a-f0-9]+:/));
+      if (senderLine) {
+        // 提取 ":" 后面的内容
+        userQuery = senderLine.split(':', 2)[1]?.trim() || userQuery;
+        console.log(`[ISS Hook DEBUG] Extracted userQuery = "${userQuery}"`);
+      }
+    }
+    
+    console.log(`[ISS Hook DEBUG] userQuery type = ${typeof userQuery}`);
+    console.log(`[ISS Hook DEBUG] userQuery length = ${userQuery.length}`);
     
     if (!userQuery || typeof userQuery !== 'string' || userQuery.trim().length === 0) {
-      return;
-    }
-
-    // 跳过元数据消息（比如 message_id 标签）
-    if (userQuery.startsWith('[message_id:') || userQuery.startsWith('ou_')) {
+      console.log(`[ISS Hook DEBUG] Skipping: empty or invalid userQuery`);
       return;
     }
 
