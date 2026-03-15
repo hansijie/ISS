@@ -1,0 +1,196 @@
+/**
+ * ISS Hook Handler - Intelligent Skill Selection
+ * 
+ * 在 message:preprocessed 阶段拦截消息，召回相关 skills 并注入
+ */
+
+const path = require('path');
+const fs = require('fs');
+
+// 延迟加载
+let SkillRetriever;
+let retriever;
+let config;
+let isInitialized = false;
+
+/**
+ * 初始化 ISS
+ */
+async function initializeISS() {
+  if (isInitialized) {
+    return;
+  }
+
+  try {
+    // ISS 扩展路径
+    const issPath = path.join(process.env.HOME || '', '.openclaw', 'extensions', 'openclaw-iss');
+    
+    // 检查 ISS 是否已安装
+    if (!fs.existsSync(issPath)) {
+      console.warn('[ISS Hook] openclaw-iss extension not found, hook disabled');
+      isInitialized = true;
+      return;
+    }
+
+    // 加载配置
+    const configPath = path.join(issPath, 'config.json');
+    if (fs.existsSync(configPath)) {
+      const configContent = fs.readFileSync(configPath, 'utf-8');
+      config = JSON.parse(configContent);
+    } else {
+      config = {
+        enabled: true,
+        s3Bucket: process.env.OPENCLAW_SKILLS_VECTOR_BUCKET || 'openclaw-skills-vectors',
+        awsRegion: process.env.AWS_REGION || 'us-east-1',
+        topK: parseInt(process.env.ISS_TOP_K || '3'),
+        threshold: parseFloat(process.env.ISS_THRESHOLD || '0.2'),
+        cacheEnabled: true,
+        cacheTTL: 3600
+      };
+    }
+
+    // 环境变量覆盖
+    if (process.env.OPENCLAW_SKILLS_VECTOR_BUCKET) {
+      config.s3Bucket = process.env.OPENCLAW_SKILLS_VECTOR_BUCKET;
+    }
+    if (process.env.AWS_REGION) {
+      config.awsRegion = process.env.AWS_REGION;
+    }
+    if (process.env.ISS_ENABLED !== undefined) {
+      config.enabled = process.env.ISS_ENABLED === 'true';
+    }
+    if (process.env.ISS_TOP_K) {
+      config.topK = parseInt(process.env.ISS_TOP_K);
+    }
+    if (process.env.ISS_THRESHOLD) {
+      config.threshold = parseFloat(process.env.ISS_THRESHOLD);
+    }
+
+    // 检查是否启用
+    if (!config.enabled) {
+      console.log('[ISS Hook] Disabled in config');
+      isInitialized = true;
+      return;
+    }
+
+    // 加载 SkillRetriever
+    const retrieverPath = path.join(issPath, 'skill-retriever.js');
+    const { SkillRetriever: Retriever } = require(retrieverPath);
+    SkillRetriever = Retriever;
+
+    // 初始化检索器
+    retriever = new SkillRetriever(config);
+    await retriever.init();
+
+    console.log('✅ ISS Hook: Initialized');
+    console.log(`   S3 Bucket: ${config.s3Bucket}`);
+    console.log(`   Top K: ${config.topK}, Threshold: ${config.threshold}`);
+
+    isInitialized = true;
+  } catch (error) {
+    console.error(`❌ ISS Hook: Initialization failed: ${error.message}`);
+    console.error('[ISS Hook] Hook will be disabled for this session');
+    isInitialized = true;
+    config = { enabled: false };
+  }
+}
+
+/**
+ * 构建 skills 描述块
+ */
+function buildSkillsBlock(skills) {
+  let block = '\n<available_skills>\n';
+  block += '  <!-- ISS: Dynamically retrieved relevant skills -->\n';
+  
+  for (const skill of skills) {
+    block += '  <skill>\n';
+    block += `    <name>${skill.name}</name>\n`;
+    block += `    <description>${skill.description}</description>\n`;
+    block += `    <location>${skill.location}</location>\n`;
+    block += '  </skill>\n';
+  }
+  
+  block += '</available_skills>\n';
+  
+  return block;
+}
+
+/**
+ * Hook Handler
+ */
+const handler = async (event) => {
+  // 只处理 message:preprocessed 事件
+  if (event.type !== 'message' || event.action !== 'preprocessed') {
+    return;
+  }
+
+  try {
+    // 延迟初始化
+    await initializeISS();
+
+    // 检查是否已启用
+    if (!config || !config.enabled || !retriever) {
+      return;
+    }
+
+    // 提取用户消息
+    const userQuery = event.context?.bodyForAgent || event.context?.body || '';
+    
+    if (!userQuery || typeof userQuery !== 'string' || userQuery.trim().length === 0) {
+      return;
+    }
+
+    // 跳过元数据消息（比如 message_id 标签）
+    if (userQuery.startsWith('[message_id:') || userQuery.startsWith('ou_')) {
+      return;
+    }
+
+    // 截断显示的问题文本
+    const displayQuery = userQuery.length > 80 
+      ? userQuery.substring(0, 80) + '...' 
+      : userQuery;
+    
+    console.log(`\n🎯 ISS: Retrieving skills for: "${displayQuery}"`);
+    
+    const startTime = Date.now();
+    
+    // 检索相关 skills
+    const relevantSkills = await retriever.retrieveRelevantSkills(userQuery);
+    
+    const retrievalTime = Date.now() - startTime;
+    
+    if (relevantSkills.length === 0) {
+      console.log(`   ⚠️  No relevant skills found (threshold: ${config.threshold})`);
+      console.log(`   ⏱️  Retrieval time: ${retrievalTime}ms\n`);
+      return;
+    }
+    
+    // 输出匹配的 skills
+    console.log(`   ✅ Found ${relevantSkills.length} relevant skill(s):`);
+    relevantSkills.forEach((s, i) => {
+      console.log(`      ${i + 1}. ${s.name} (score: ${s.score.toFixed(3)})`);
+    });
+    console.log(`   ⏱️  Retrieval time: ${retrievalTime}ms`);
+    
+    // 构建 skills 描述块
+    const skillsBlock = buildSkillsBlock(relevantSkills);
+    
+    // 注入到消息前面
+    if (event.context && event.context.bodyForAgent) {
+      event.context.bodyForAgent = skillsBlock + '\n\n' + event.context.bodyForAgent;
+      console.log(`   ✅ Skills injected\n`);
+    } else if (event.context && event.context.body) {
+      event.context.body = skillsBlock + '\n\n' + event.context.body;
+      console.log(`   ✅ Skills injected\n`);
+    } else {
+      console.log(`   ⚠️  Could not inject skills (context not writable)\n`);
+    }
+    
+  } catch (error) {
+    console.error(`❌ ISS Hook Error: ${error.message}`);
+    console.error(error.stack);
+    // 出错时静默失败，不阻塞消息处理
+  }
+};
+
+module.exports = handler;

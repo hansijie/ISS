@@ -1,0 +1,37 @@
+{
+  "name": "openclaw-iss",
+  "version": "2.0.0",
+  "description": "OpenClaw Intelligent Skills System - Smart skill retrieval using S3 Vectors",
+  "main": "index.js",
+  "scripts": {
+    "vectorize": "node scripts/vectorize-skills.js",
+    "test": "jest",
+    "test:watch": "jest --watch"
+  },
+  "keywords": [
+    "openclaw",
+    "skills",
+    "vector-search",
+    "s3",
+    "bedrock",
+    "ai"
+  ],
+  "author": "Jace Team",
+  "license": "MIT",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.490.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.490.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "openclaw": {
+    "extension": true,
+    "hooks": [
+      "messageReceived"
+    ]
+  }
+}

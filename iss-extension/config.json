@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "s3Bucket": "openclaw-skills-vectors",
+  "awsRegion": "us-east-1",
+  "topK": 3,
+  "threshold": 0.2,
+  "cacheEnabled": true,
+  "cacheTTL": 3600
+}

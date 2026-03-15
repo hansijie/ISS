@@ -1,0 +1,17 @@
+{
+  "name": "vectorize-skills",
+  "version": "2.0.0",
+  "description": "向量化所有 OpenClaw skills 并保存到 S3 Vectors（支持增量更新）",
+  "main": "vectorize-skills.js",
+  "scripts": {
+    "vectorize": "node vectorize-skills.js",
+    "vectorize:force": "node vectorize-skills.js --force"
+  },
+  "keywords": ["openclaw", "skills", "vectorization", "iss", "s3", "incremental"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.645.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.645.0"
+  }
+}

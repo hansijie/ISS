@@ -1,0 +1,46 @@
+{
+  "id": "openclaw-iss",
+  "version": "2.0.0",
+  "description": "Intelligent Skills System - Smart skill retrieval using S3 Vectors and Nova MME",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable ISS extension"
+      },
+      "s3Bucket": {
+        "type": "string",
+        "default": "openclaw-skills-vectors",
+        "description": "S3 bucket name for vector storage"
+      },
+      "awsRegion": {
+        "type": "string",
+        "default": "us-east-1",
+        "description": "AWS region"
+      },
+      "topK": {
+        "type": "number",
+        "default": 3,
+        "description": "Number of skills to retrieve"
+      },
+      "threshold": {
+        "type": "number",
+        "default": 0.2,
+        "description": "Similarity threshold (0-1)"
+      },
+      "cacheEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable embedding cache"
+      },
+      "cacheTTL": {
+        "type": "number",
+        "default": 3600,
+        "description": "Cache TTL in seconds"
+      }
+    }
+  }
+}
