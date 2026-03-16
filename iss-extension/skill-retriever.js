@@ -159,7 +159,7 @@ class SkillRetriever {
     }
     
     // 4. 过滤低相似度结果
-    const filtered = results.filter(r => r.score >= this.config.threshold);
+    const filtered = skills.filter(r => r.score >= this.config.threshold);
     
     // 5. 缓存结果
     if (this.config.cacheEnabled && filtered.length > 0) {
