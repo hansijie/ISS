@@ -1,6 +1,9 @@
 {
   "s3Bucket": "openclaw-skills-vectors",
+  "vectorBucketName": "openclaw-skills-vectors",
+  "vectorIndexName": "skills",
   "awsRegion": "us-east-1",
   "embeddingModel": "amazon.nova-2-multimodal-embeddings-v1:0",
-  "embeddingDimension": 1024
+  "embeddingDimension": 1024,
+  "distanceMetric": "cosine"
 }

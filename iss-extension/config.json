@@ -1,6 +1,9 @@
 {
   "enabled": true,
   "s3Bucket": "openclaw-skills-vectors",
+  "vectorBucketName": "openclaw-skills-vectors",
+  "vectorIndexName": "skills",
+  "use_s3v": false,
   "awsRegion": "us-east-1",
   "topK": 3,
   "threshold": 0.2,
