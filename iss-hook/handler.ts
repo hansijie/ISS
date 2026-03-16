@@ -43,7 +43,7 @@ async function initializeISS() {
         s3Bucket: process.env.OPENCLAW_SKILLS_GP_BUCKET || 'openclaw-skills-vectors',
 	vectorBucketName: process.env.OPENCLAW_SKILLS_VECTOR_BUCKET || 'openclaw-skills-vectors',
 	vectorIndexName: process.env.OPENCLAW_SKILLS_VECTOR_INDEX || 'skills',
-	use_s3v: process.env.OPENCLAW_SKILLS_USE_S3_VECTORS_BUCKET || false,
+	use_s3v: process.env.OPENCLAW_SKILLS_USE_S3_VECTORS_BUCKET === 'true',
         awsRegion: process.env.AWS_REGION || 'us-east-1',
         topK: parseInt(process.env.ISS_TOP_K || '3'),
         threshold: parseFloat(process.env.ISS_THRESHOLD || '0.2'),

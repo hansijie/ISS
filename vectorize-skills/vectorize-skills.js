@@ -34,7 +34,7 @@ const SKILLS_DIR = process.env.OPENCLAW_SKILLS_DIR || path.join(process.env.HOME
 const GP_BUCKET = process.env.OPENCLAW_SKILLS_GP_BUCKET || 'openclaw-skills-vectors';
 const VECTOR_BUCKET = process.env.OPENCLAW_SKILLS_VECTOR_BUCKET || 'openclaw-skills-vectors';
 const VECTOR_INDEX = process.env.OPENCLAW_SKILLS_VECTOR_INDEX || 'skills';
-const USE_S3V = process.env.OPENCLAW_SKILLS_USE_S3_VECTORS_BUCKET || false;
+const USE_S3V = process.env.OPENCLAW_SKILLS_USE_S3_VECTORS_BUCKET === 'true',
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
 const NOVA_MME_MODEL = 'amazon.nova-2-multimodal-embeddings-v1:0';
 
