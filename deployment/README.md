@@ -129,7 +129,10 @@ GITHUB_TOKEN=your_token_here
 GITHUB_USERNAME=your_username
 
 # ISS - Intelligent Skill Selection
+OPENCLAW_SKILLS_GP_BUCKET=openclaw-skills-vectors
 OPENCLAW_SKILLS_VECTOR_BUCKET=openclaw-skills-vectors
+OPENCLAW_SKILLS_VECTOR_INDEX=skills
+OPENCLAW_SKILLS_USE_S3_VECTORS_BUCKET=false # 是否启用 S3 向量桶
 AWS_REGION=us-east-1
 ISS_TOP_K=3
 ISS_THRESHOLD=0.2

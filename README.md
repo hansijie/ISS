@@ -63,7 +63,7 @@ ISS 分为**离线准备**和**运行时召回**两个阶段：
 └─────────────────────────────────────────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  Step 4: 存储到 S3 Vectors                                  │
+│  Step 4: 存储到 S3 通用桶                                   │
 │  位置：s3://openclaw-skills-vectors/skills/                 │
 │  格式：{skill_name}.json                                    │
 │  内容：{                                                    │
@@ -71,6 +71,21 @@ ISS 分为**离线准备**和**运行时召回**两个阶段：
 │    "description": "...",                                    │
 │    "vector": [1024维向量],                                  │
 │    "metadata": {...}                                        │
+│  }                                                          │
+│                                                             │
+│  Step 4: 存储到 S3 向量桶                                   │
+│  位置：bucket/openclaw-skills-vectors/index/skills          │
+│  格式："key": {skill_name}                                  │
+│  向量："data": {                                            │
+│    "float32": [...]                                         │
+│  }                                                          │
+│  内容："metadata": {                                        │
+│    "skill_name": "feishu-doc",                              │
+│    "localtion": "/home/openclaw/.openclaw/...",             │
+│    "version": "1.0.0",                                      │
+│    "keywords": "feishu-doc",                                │
+│    "vectorized_at": "2026-03-15T15:56:20.100Z",             │
+│    "description": "..."                                     │
 │  }                                                          │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -118,6 +133,9 @@ npm run vectorize:force     # 强制全量更新
 │  读取 s3://openclaw-skills-vectors/skills/*.json            │
 │  缓存：预加载（10分钟 TTL），避免每次都请求 S3              │
 │  耗时：~50ms（缓存命中）或 ~100ms（缓存未命中）             │
+│                                                             │
+│  如启用 S3 向量桶:                                          │
+│  读取 通过 S3 Vectors 原生 QueryVectors API 进行相似度查询  │
 └─────────────────────────────────────────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -132,6 +150,9 @@ npm run vectorize:force     # 强制全量更新
 │    music: 0.089                                             │
 │    ...                                                      │
 │  耗时：~5ms（客户端计算，6 个 skills）                      │
+│                                                             │
+│  如启用 S3 向量桶:                                          │
+│  向量距离由服务端返回，无需在客户端计算相似度               │
 └─────────────────────────────────────────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -225,7 +246,7 @@ npm run vectorize:force     # 强制全量更新
 │  └─────────────────────────────────────┘                  │
 │                    ↓ 写入                                  │
 │  ┌─────────────────────────────────────┐                  │
-│  │  Amazon S3 Vectors (向量存储)       │                  │
+│  │  Amazon S3 Vectors (通用桶为例)     │                  │
 │  │  s3://openclaw-skills-vectors/      │                  │
 │  │                                     │                  │
 │  │  skills/                            │                  │
@@ -276,7 +297,7 @@ npm run vectorize:force     # 强制全量更新
 │  │  ├── skill-retriever.js             │                  │
 │  │  │   (核心召回算法)                  │                  │
 │  │  │   • 向量化查询 (Nova MME)         │                  │
-│  │  │   • 从 S3 加载 skills             │                  │
+│  │  │   • 从 S3 或 S3 向量桶加载 skills │                  │
 │  │  │   • 余弦相似度计算                │                  │
 │  │  │   • 过滤 + 排序 + Top-K           │                  │
 │  │  │   • LRU 缓存（100条，1小时TTL）   │                  │
@@ -324,7 +345,7 @@ npm run vectorize:force     # 强制全量更新
 
 - **向量化模型**：Amazon Nova MME (amazon.nova-2-multimodal-embeddings-v1:0)
 - **向量维度**：1024D
-- **向量存储**：Amazon S3 + 客户端搜索（S3 Vectors API 可选）
+- **向量存储**：Amazon S3 通用桶 + 客户端搜索（S3 Vectors 原生 API 可选）
 - **相似度算法**：余弦相似度（Cosine Similarity）
 - **缓存**：LRU (最多 100 条，TTL 1 小时)
 - **集成方式**：OpenClaw Internal Hooks System
@@ -412,7 +433,10 @@ cd ~/.openclaw/skills/vectorize-skills
 npm install
 
 # 设置环境变量
+export OPENCLAW_SKILLS_GP_BUCKET="openclaw-skills-vectors"
 export OPENCLAW_SKILLS_VECTOR_BUCKET="openclaw-skills-vectors"
+export OPENCLAW_SKILLS_VECTOR_INDEX="skills"
+export OPENCLAW_SKILLS_USE_S3_VECTORS_BUCKET=true
 export AWS_REGION="us-east-1"
 
 # 首次向量化（全量）
@@ -453,7 +477,10 @@ openclaw gateway restart
 在 `~/.openclaw/.env` 中添加：
 
 ```bash
+OPENCLAW_SKILLS_GP_BUCKET=openclaw-skills-vectors
 OPENCLAW_SKILLS_VECTOR_BUCKET=openclaw-skills-vectors
+OPENCLAW_SKILLS_VECTOR_INDEX=skills
+OPENCLAW_SKILLS_USE_S3_VECTORS_BUCKET=true
 AWS_REGION=us-east-1
 ISS_TOP_K=3
 ISS_THRESHOLD=0.2
@@ -551,8 +578,11 @@ openclaw gateway restart
 ### 向量化失败
 
 ```bash
-# 检查 S3 权限
+# 检查 S3 通用桶权限
 aws s3 ls s3://openclaw-skills-vectors/
+
+# 检查 S3 向量桶权限
+aws s3vectors get-index --vector-bucket-name eval --index-name skills
 
 # 检查 Bedrock 权限
 aws bedrock list-foundation-models --region us-east-1
@@ -567,8 +597,11 @@ npm run vectorize:force
 # 检查相似度阈值（默认 0.2）
 export ISS_THRESHOLD=0.1
 
-# 检查 S3 中的向量数据
+# 检查 S3 通用桶中的向量数据
 aws s3 ls s3://openclaw-skills-vectors/skills/
+
+# 检查 S3 向量桶中的向量数据
+aws s3vectors list-vectors --vector-bucket-name openclaw-skills-vectors --index-name skills --return-metadata
 ```
 
 ## 📚 文档

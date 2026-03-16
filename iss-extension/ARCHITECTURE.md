@@ -37,9 +37,43 @@
 cd ~/.openclaw/skills/vectorize-skills
 npm run vectorize
 
-# 输出：
+# 输出（使用 S3 通用桶）：
 # - S3: s3://openclaw-skills-vectors/skills/*.json
 # - 每个 skill 一个 JSON 文件（包含向量）
+
+# 输出（使用 S3 向量桶）：
+# - S3 向量桶名: openclaw-skills-vectors
+# - S3 向量桶索引名: skills
+# - 每个 skill 为向量索引中的一条向量记录
+# 可以通过 aws cli 获取向量记录
+$ aws s3vectors list-vectors --vector-bucket-name openclaw-skills-vectors --index-name skills --region us-east-1 --return-metadata
+{
+    "vectors": [
+        {
+            "key": "github-search",
+            "metadata": {
+                "description": "GitHub 仓库深度搜索与分析。支持按关键词、语言、stars、更新时间筛选，获取细分领域最新开源项目。
+专为技术调研设计。",
+                "vectorized_at": "2026-03-15T15:56:21.626Z",
+                "version": "1.0.0",
+                "keywords": "github-search",
+                "location": "/home/openclaw/.openclaw/workspace/skills/github-search",
+                "skill_name": "github-search"
+            }
+        },
+        {
+            "key": "github-cli",
+            "metadata": {
+                "skill_name": "github-cli",
+                "location": "/home/openclaw/.openclaw/workspace/skills/github-cli",
+                "version": "1.0.0",
+                "keywords": "github-cli",
+                "vectorized_at": "2026-03-15T15:56:20.100Z",
+                "description": "Comprehensive GitHub CLI (gh) reference. Covers repos, issues, PRs, Actions, releases, gists, search, projects v2, API, secrets/variables, labels, codespaces, extensions, auth, and advanced GraphQL patterns."
+            }
+        }
+    ]
+}
 ```
 
 ### 运行时（自动）
@@ -67,10 +101,11 @@ Agent 处理（只看到召回的 skills）
 - 扫描所有 skills 目录（bundled/managed/workspace）
 - 提取 SKILL.md 的 description 和 keywords
 - 使用 Nova MME 生成向量
-- 存储到 S3 Vectors
+- 存储到 S3 通用桶或者 S3 向量桶
 
 **依赖：**
 - `@aws-sdk/client-s3`
+- `@aws-sdk/client-s3vectors`
 - `@aws-sdk/client-bedrock-runtime`
 - Node.js >= 18
 
@@ -104,7 +139,8 @@ npm run vectorize
 
 **职责：**
 - 向量化查询（Nova MME）
-- S3 向量搜索（客户端余弦相似度）
+- 使用 S3 标准桶时，S3 向量搜索（客户端余弦相似度）
+- 使用 S3 向量桶时，直接调用 QueryVectors API，服务端完成搜索
 - 相似度过滤（threshold）
 - 缓存（LRU + TTL）
 
@@ -117,7 +153,10 @@ npm run vectorize
 ### 环境变量
 
 ```bash
+export OPENCLAW_SKILLS_GP_BUCKET="openclaw-skills-vectors"
 export OPENCLAW_SKILLS_VECTOR_BUCKET="openclaw-skills-vectors"
+export OPENCLAW_SKILLS_VECTOR_INDEX="skills"
+export OPENCLAW_SKILLS_USE_S3_VECTORS_BUCKET=false
 export AWS_REGION="us-east-1"
 export ISS_TOP_K="3"
 export ISS_THRESHOLD="0.2"
@@ -154,6 +193,9 @@ export ISS_ENABLED="true"
 {
   "enabled": true,
   "s3Bucket": "openclaw-skills-vectors",
+  "vectorBucketName": "openclaw-skills-vectors",
+  "vectorIndexName": "skills",
+  "use_s3v": false,
   "awsRegion": "us-east-1",
   "topK": 3,
   "threshold": 0.2,
