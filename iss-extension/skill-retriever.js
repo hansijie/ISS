@@ -173,22 +173,27 @@ class SkillRetriever {
    * S3 Vectors 原生查询
    */
   async queryS3Vectors(queryVector) {
-    const command = new QueryVectorsCommand({
-      vectorBucketName: this.config.vectorBucketName,
-      indexName: this.config.vectorIndexName,
-      topK: this.config.topK,
-      queryVector: { float32: queryVector },
-      returnDistance: true,
-      returnMetadata: true
-    });
+    try {
+      const command = new QueryVectorsCommand({
+        vectorBucketName: this.config.vectorBucketName,
+        indexName: this.config.vectorIndexName,
+        topK: this.config.topK,
+        queryVector: { float32: queryVector },
+        returnDistance: true,
+        returnMetadata: true
+      });
 
-    const response = await this.s3VectorsClient.send(command);
+      const response = await this.s3VectorsClient.send(command);
 
-    if (!response.vectors || response.vectors.length === 0) {
+      if (!response.vectors || response.vectors.length === 0) {
+        return [];
+      }
+
+      return response.vectors;
+    } catch (error) {
+      console.warn(`⚠️  S3 Vectors query failed: ${error.message}`);
       return [];
     }
-
-    return response.vectors;
   }
 
   /**
