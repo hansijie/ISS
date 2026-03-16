@@ -103,7 +103,7 @@ fi
 # 2. 创建 Vector Index
 echo -e "${YELLOW}📇 Creating S3 Vectors Index: ${VECTOR_INDEX_NAME}${NC}"
 
-if aws s3vectors create-vector-index \
+if aws s3vectors create-index \
     --vector-bucket-name "${VECTOR_BUCKET_NAME}" \
     --index-name "${VECTOR_INDEX_NAME}" \
     --dimension "${DIMENSION}" \

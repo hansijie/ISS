@@ -81,7 +81,7 @@ ISS 分为**离线准备**和**运行时召回**两个阶段：
 │  }                                                          │
 │  内容："metadata": {                                        │
 │    "skill_name": "feishu-doc",                              │
-│    "localtion": "/home/openclaw/.openclaw/...",             │
+│    "location": "/home/openclaw/.openclaw/...",              │
 │    "version": "1.0.0",                                      │
 │    "keywords": "feishu-doc",                                │
 │    "vectorized_at": "2026-03-15T15:56:20.100Z",             │
@@ -436,7 +436,7 @@ npm install
 export OPENCLAW_SKILLS_GP_BUCKET="openclaw-skills-vectors"
 export OPENCLAW_SKILLS_VECTOR_BUCKET="openclaw-skills-vectors"
 export OPENCLAW_SKILLS_VECTOR_INDEX="skills"
-export OPENCLAW_SKILLS_USE_S3_VECTORS_BUCKET=true
+export OPENCLAW_SKILLS_USE_S3_VECTORS_BUCKET=false
 export AWS_REGION="us-east-1"
 
 # 首次向量化（全量）
@@ -603,6 +603,18 @@ aws s3 ls s3://openclaw-skills-vectors/skills/
 # 检查 S3 向量桶中的向量数据
 aws s3vectors list-vectors --vector-bucket-name openclaw-skills-vectors --index-name skills --return-metadata
 ```
+
+## 📖 迁移指南
+
+为了避免混淆，规范桶命名方式:
+
+如果希望使用 S3 通用桶 - 请设置 `OPENCLAW_SKILLS_GP_BUCKET`
+如果希望使用 S3 向量桶 - 请设置 `OPENCLAW_SKILLS_VECTOR_BUCKET`, `OPENCLAW_SKILLS_VECTOR_INDEX` 并设置 `OPENCLAW_SKILLS_USE_S3_VECTORS_BUCKET=true`
+
+如果已经使用了 `OPENCLAW_SKILLS_VECTOR_BUCKET` 作为 S3 通用桶的桶名，并想迁移到 S3 向量桶，请按以上配置设置环境变量，并且:
+
+1. 重启网关 `openclaw gateway restart`
+2. 强制重新向量化 `npm run vectorize:force`
 
 ## 📚 文档
 
