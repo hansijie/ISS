@@ -26,8 +26,17 @@ function loadConfig(pluginConfig = {}) {
     Object.assign(config, pluginConfig);
     
     // 环境变量覆盖
+    if (process.env.OPENCLAW_SKILLS_GP_BUCKET) {
+      config.s3Bucket = process.env.OPENCLAW_SKILLS_GP_BUCKET;
+    }
     if (process.env.OPENCLAW_SKILLS_VECTOR_BUCKET) {
-      config.s3Bucket = process.env.OPENCLAW_SKILLS_VECTOR_BUCKET;
+      config.vectorBucketName = process.env.OPENCLAW_SKILLS_VECTOR_BUCKET;
+    }
+    if (process.env.OPENCLAW_SKILLS_VECTOR_INDEX) {
+      config.vectorIndexName = process.env.OPENCLAW_SKILLS_VECTOR_INDEX;
+    }
+    if (process.env.OPENCLAW_SKILLS_USE_S3_VECTORS_BUCKET) {
+      config.use_s3v = process.env.OPENCLAW_SKILLS_USE_S3_VECTORS_BUCKET;
     }
     if (process.env.AWS_REGION) {
       config.awsRegion = process.env.AWS_REGION;
@@ -41,7 +50,10 @@ function loadConfig(pluginConfig = {}) {
     console.warn(`⚠️  ISS: Failed to load config.json, using defaults: ${error.message}`);
     return {
       enabled: true,
-      s3Bucket: process.env.OPENCLAW_SKILLS_VECTOR_BUCKET || 'openclaw-skills-vectors',
+      s3Bucket: process.env.OPENCLAW_SKILLS_GP_BUCKET || 'openclaw-skills-vectors',
+      vectorBucketName: process.env.OPENCLAW_SKILLS_VECTOR_BUCKET || 'openclaw-skills-vectors',
+      vectorIndexName: process.env.OPENCLAW_SKILLS_VECTOR_INDEX || 'skills',
+      use_s3v: process.env.OPENCLAW_SKILLS_USE_S3_VECTORS_BUCKET === 'true',
       awsRegion: process.env.AWS_REGION || 'us-east-1',
       topK: 3,
       threshold: 0.2,
@@ -58,7 +70,11 @@ function loadConfig(pluginConfig = {}) {
 async function initAsync() {
   console.log('🚀 ISS v2.1: Initializing...');
   console.log(`   Mode: before_prompt_build hook`);
-  console.log(`   S3 Bucket: ${config.s3Bucket}`);
+  if (config.use_s3v) {
+    console.log(`   S3 Vectors Bucket: ${config.vectorBucketName}, Index: ${config.vectorIndexName}`);
+  } else {
+    console.log(`   S3 GP Bucket: ${config.s3Bucket}`);
+  }
   console.log(`   AWS Region: ${config.awsRegion}`);
   console.log(`   Top K: ${config.topK}`);
   console.log(`   Threshold: ${config.threshold}`);

@@ -3,7 +3,7 @@
 # OpenClaw ISS - S3 Vectors 初始化脚本
 # 
 # 功能：
-# 1. 创建 S3 向量桶
+# 1. 创建 S3 通用桶
 # 2. 启用 S3 Vectors（如果支持）
 # 3. 配置 IAM 权限（可选）
 #
@@ -22,12 +22,21 @@ echo -e "${BLUE}OpenClaw ISS - S3 Vectors 初始化${NC}"
 echo -e "${BLUE}========================================${NC}\n"
 
 # 读取配置
-BUCKET_NAME=${OPENCLAW_SKILLS_VECTOR_BUCKET:-openclaw-skills-vectors}
+GP_BUCKET_NAME=${OPENCLAW_SKILLS_GP_BUCKET:-openclaw-skills-vectors}
+VECTOR_BUCKET_NAME=${OPENCLAW_SKILLS_VECTOR_BUCKET:-openclaw-skills-vectors}
+VECTOR_INDEX_NAME=${OPENCLAW_SKILLS_VECTOR_INDEX:-skills}
+AWS_REGION=${AWS_REGION:-us-east-1}
+DIMENSION=1024
+DISTANCE_METRIC="cosine"
 AWS_REGION=${AWS_REGION:-us-east-1}
 
 echo -e "${BLUE}配置:${NC}"
-echo -e "  S3 Bucket: ${GREEN}${BUCKET_NAME}${NC}"
-echo -e "  AWS Region: ${GREEN}${AWS_REGION}${NC}\n"
+echo -e "  S3 General Purpose Bucket: ${GREEN}${GP_BUCKET_NAME}${NC}"
+echo -e "  S3 Vectors Bucket:         ${GREEN}${VECTOR_BUCKET_NAME}${NC}"
+echo -e "  S3 Vectors Index:          ${GREEN}${VECTOR_INDEX_NAME}${NC}"
+echo -e "    - Dimensions:            ${GREEN}${DIMENSION}${NC}"
+echo -e "    - Distance Metric:       ${GREEN}${DISTANCE_METRIC}${NC}"
+echo -e "  AWS Region:                ${GREEN}${AWS_REGION}${NC}\n"
 
 # 检查 AWS CLI
 if ! command -v aws &> /dev/null; then
@@ -47,20 +56,20 @@ fi
 echo -e "${GREEN}✅ AWS credentials configured${NC}\n"
 
 # 1. 创建 S3 桶
-echo -e "${YELLOW}📦 Creating S3 bucket: ${BUCKET_NAME}${NC}"
+echo -e "${YELLOW}📦 Creating S3 General purpose bucket: ${GP_BUCKET_NAME}${NC}"
 
 # 检查桶是否已存在
-if aws s3api head-bucket --bucket "${BUCKET_NAME}" 2>/dev/null; then
+if aws s3api head-bucket --bucket "${GP_BUCKET_NAME}" 2>/dev/null; then
     echo -e "${YELLOW}⚠️  Bucket already exists, skipping creation${NC}\n"
 else
     # 根据区域选择不同的创建命令
     if [ "${AWS_REGION}" = "us-east-1" ]; then
         aws s3api create-bucket \
-            --bucket "${BUCKET_NAME}" \
+            --bucket "${GP_BUCKET_NAME}" \
             --region "${AWS_REGION}"
     else
         aws s3api create-bucket \
-            --bucket "${BUCKET_NAME}" \
+            --bucket "${GP_BUCKET_NAME}" \
             --region "${AWS_REGION}" \
             --create-bucket-configuration LocationConstraint="${AWS_REGION}"
     fi
@@ -71,7 +80,7 @@ fi
 # 2. 启用版本控制（推荐）
 echo -e "${YELLOW}🔄 Enabling versioning...${NC}"
 aws s3api put-bucket-versioning \
-    --bucket "${BUCKET_NAME}" \
+    --bucket "${GP_BUCKET_NAME}" \
     --versioning-configuration Status=Enabled
 
 echo -e "${GREEN}✅ Versioning enabled${NC}\n"
@@ -79,26 +88,30 @@ echo -e "${GREEN}✅ Versioning enabled${NC}\n"
 # 3. 启用 S3 Vectors（如果支持）
 echo -e "${YELLOW}🔍 Attempting to enable S3 Vectors...${NC}"
 
-# 注意：S3 Vectors 是较新功能，可能需要申请预览访问
+# 注意：S3 Vectors 在部分区域可用
 # 如果 API 不可用，会失败，但不影响 ISS 使用（会自动回退到客户端搜索）
-if aws s3api put-bucket-vector-search-configuration \
-    --bucket "${BUCKET_NAME}" \
-    --vector-search-configuration '{
-        "Status": "Enabled",
-        "VectorIndexConfiguration": {
-            "Dimensions": 1024,
-            "DistanceMetric": "cosine",
-            "IndexType": "hnsw",
-            "HnswConfiguration": {
-                "M": 16,
-                "EfConstruction": 256
-            }
-        }
-    }' 2>/dev/null; then
-    echo -e "${GREEN}✅ S3 Vectors enabled${NC}\n"
+echo -e "${YELLOW}📦 Creating S3 Vectors Bucket: ${VECTOR_BUCKET_NAME}${NC}"
+
+if aws s3vectors create-vector-bucket \
+    --vector-bucket-name "${VECTOR_BUCKET_NAME}" \
+    --region "${AWS_REGION}" 2>/dev/null; then
+    echo -e "${GREEN}✅ S3 Vectors Bucket created${NC}\n"
 else
-    echo -e "${YELLOW}⚠️  S3 Vectors API not available (preview feature)${NC}"
-    echo -e "   ${BLUE}ℹ️  ISS will use client-side vector search (still works!)${NC}\n"
+    echo -e "${YELLOW}⚠️  S3 Vectors Bucket may already exist, continuing...${NC}\n"
+fi
+
+# 2. 创建 Vector Index
+echo -e "${YELLOW}📇 Creating S3 Vectors Index: ${VECTOR_INDEX_NAME}${NC}"
+
+if aws s3vectors create-index \
+    --vector-bucket-name "${VECTOR_BUCKET_NAME}" \
+    --index-name "${VECTOR_INDEX_NAME}" \
+    --dimension "${DIMENSION}" \
+    --distance-metric "${DISTANCE_METRIC}" \
+    --region "${AWS_REGION}" 2>/dev/null; then
+    echo -e "${GREEN}✅ S3 Vectors Index created${NC}\n"
+else
+    echo -e "${YELLOW}⚠️  S3 Vectors Index may already exist, continuing...${NC}\n"
 fi
 
 # 4. 设置桶策略（可选，根据需要）
@@ -119,15 +132,15 @@ POLICY="{
                 \"s3:ListBucket\"
             ],
             \"Resource\": [
-                \"arn:aws:s3:::${BUCKET_NAME}\",
-                \"arn:aws:s3:::${BUCKET_NAME}/*\"
+                \"arn:aws:s3:::${GP_BUCKET_NAME}\",
+                \"arn:aws:s3:::${GP_BUCKET_NAME}/*\"
             ]
         }
     ]
 }"
 
 if aws s3api put-bucket-policy \
-    --bucket "${BUCKET_NAME}" \
+    --bucket "${GP_BUCKET_NAME}" \
     --policy "${POLICY}" 2>/dev/null; then
     echo -e "${GREEN}✅ Bucket policy set${NC}\n"
 else
@@ -136,7 +149,7 @@ fi
 
 # 5. 创建 skills/ 前缀（可选）
 echo -e "${YELLOW}📁 Creating skills/ prefix...${NC}"
-echo "" | aws s3 cp - "s3://${BUCKET_NAME}/skills/.keep" --content-type text/plain
+echo "" | aws s3 cp - "s3://${GP_BUCKET_NAME}/skills/.keep" --content-type text/plain
 echo -e "${GREEN}✅ Prefix created${NC}\n"
 
 # 完成

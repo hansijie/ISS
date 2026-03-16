@@ -40,7 +40,10 @@ async function initializeISS() {
     } else {
       config = {
         enabled: true,
-        s3Bucket: process.env.OPENCLAW_SKILLS_VECTOR_BUCKET || 'openclaw-skills-vectors',
+        s3Bucket: process.env.OPENCLAW_SKILLS_GP_BUCKET || 'openclaw-skills-vectors',
+        vectorBucketName: process.env.OPENCLAW_SKILLS_VECTOR_BUCKET || 'openclaw-skills-vectors',
+        vectorIndexName: process.env.OPENCLAW_SKILLS_VECTOR_INDEX || 'skills',
+        use_s3v: process.env.OPENCLAW_SKILLS_USE_S3_VECTORS_BUCKET === 'true',
         awsRegion: process.env.AWS_REGION || 'us-east-1',
         topK: parseInt(process.env.ISS_TOP_K || '3'),
         threshold: parseFloat(process.env.ISS_THRESHOLD || '0.2'),
@@ -50,8 +53,17 @@ async function initializeISS() {
     }
 
     // 环境变量覆盖
+    if (process.env.OPENCLAW_SKILLS_GP_BUCKET) {
+      config.s3Bucket = process.env.OPENCLAW_SKILLS_GP_BUCKET;
+    }
     if (process.env.OPENCLAW_SKILLS_VECTOR_BUCKET) {
-      config.s3Bucket = process.env.OPENCLAW_SKILLS_VECTOR_BUCKET;
+      config.vectorBucketName = process.env.OPENCLAW_SKILLS_VECTOR_BUCKET;
+    }
+    if (process.env.OPENCLAW_SKILLS_VECTOR_INDEX) {
+      config.vectorIndexName = process.env.OPENCLAW_SKILLS_VECTOR_INDEX;
+    }
+    if (process.env.OPENCLAW_SKILLS_USE_S3_VECTORS_BUCKET) {
+      config.use_s3v = process.env.OPENCLAW_SKILLS_USE_S3_VECTORS_BUCKET;
     }
     if (process.env.AWS_REGION) {
       config.awsRegion = process.env.AWS_REGION;
@@ -83,7 +95,11 @@ async function initializeISS() {
     await retriever.init();
 
     console.log('✅ ISS Hook: Initialized');
-    console.log(`   S3 Bucket: ${config.s3Bucket}`);
+    if (config.use_s3v) {
+      console.log(`   S3 Vectors Bucket: ${config.vectorBucketName}, Index: ${config.vectorIndexName}`);
+    } else {
+      console.log(`   S3 Bucket: ${config.s3Bucket}`);
+    }
     console.log(`   Top K: ${config.topK}, Threshold: ${config.threshold}`);
 
     isInitialized = true;

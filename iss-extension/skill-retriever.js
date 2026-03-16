@@ -3,18 +3,22 @@
  * 
  * 功能：智能检索相关 skills
  * - 向量化用户问题
- * - S3 Vectors k-NN 搜索
+ * - S3 通用桶本地计算搜索 或者 S3 Vectors 原生查询（服务端计算，无需客户端余弦相似度）
  * - 相似度过滤
  * - 缓存管理
  */
 
 const { S3Client, GetObjectCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
+const { S3VectorsClient, PutVectorsCommand, GetVectorsCommand, ListVectorsCommand } = require('@aws-sdk/client-s3vectors');
 const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 
 class SkillRetriever {
   /**
    * @param {Object} config 配置对象
-   * @param {string} config.s3Bucket S3 向量桶名称
+   * @param {string} config.s3Bucket S3 通用桶名称
+   * @param {string} config.vectorBucketName S3 向量桶名称
+   * @param {string} config.vectorIndexName S3 向量索引名称
+   * @param {boolean} config.use_s3v 是否启用 S3 向量桶
    * @param {string} config.awsRegion AWS 区域
    * @param {number} config.topK 返回 top K 个 skills
    * @param {number} config.threshold 相似度阈值
@@ -24,6 +28,9 @@ class SkillRetriever {
   constructor(config) {
     this.config = {
       s3Bucket: config.s3Bucket || 'openclaw-skills-vectors',
+      vectorBucketName: config.vectorBucketName || 'openclaw-skills-vectors',
+      vectorIndexName: config.vectorIndexName || 'skills',
+      use_s3v: config.use_s3v || false,
       awsRegion: config.awsRegion || 'us-east-1',
       topK: config.topK || 3,
       threshold: config.threshold || 0.6,
@@ -33,6 +40,7 @@ class SkillRetriever {
     };
     
     this.s3Client = new S3Client({ region: this.config.awsRegion });
+    this.s3VectorsClient = new S3VectorsClient({ region: this.config.awsRegion });
     this.bedrockClient = new BedrockRuntimeClient({ region: this.config.awsRegion });
     
     // 内存缓存
@@ -45,6 +53,7 @@ class SkillRetriever {
    * 初始化（预加载 skills 列表）
    */
   async init() {
+    if (this.config.use_s3v) return; // skip if use s3v
     try {
       await this.loadSkillsList();
       console.log(`✅ ISS: Loaded ${this.skillsCache ? this.skillsCache.length : 0} skills from S3`);
@@ -131,11 +140,26 @@ class SkillRetriever {
     // 2. 向量化用户问题
     const queryVector = await this.getEmbedding(userQuery);
     
-    // 3. 向量搜索（客户端实现，因为 S3 Vectors API 可能尚未完全支持）
-    const results = await this.searchVectorsClientSide(queryVector, this.config.topK);
+    let skills;
+    if (this.config.use_s3v) {
+      // 3. 使用 S3 Vectors 原生 QueryVectors API 进行搜索
+      const results = await this.queryS3Vectors(queryVector);
+
+      // 转换为统一格式，计算 score（将 distance 转为相似度分数）
+      skills = results.map(r => ({
+        name: r.metadata?.skill_name || r.key,
+        description: r.metadata?.description || '',
+        location: r.metadata?.location || '',
+        score: 1 - (r.distance / 2), // cosine distance [0,2] -> similarity [1,0]
+        metadata: r.metadata || {}
+      }));
+    } else {
+      // 3. 向量搜索（客户端实现）
+      skills = await this.searchVectorsClientSide(queryVector, this.config.topK);
+    }
     
     // 4. 过滤低相似度结果
-    const filtered = results.filter(r => r.score >= this.config.threshold);
+    const filtered = skills.filter(r => r.score >= this.config.threshold);
     
     // 5. 缓存结果
     if (this.config.cacheEnabled && filtered.length > 0) {
@@ -145,6 +169,33 @@ class SkillRetriever {
     return filtered;
   }
   
+  /**
+   * S3 Vectors 原生查询
+   */
+  async queryS3Vectors(queryVector) {
+    try {
+      const command = new QueryVectorsCommand({
+        vectorBucketName: this.config.vectorBucketName,
+        indexName: this.config.vectorIndexName,
+        topK: this.config.topK,
+        queryVector: { float32: queryVector },
+        returnDistance: true,
+        returnMetadata: true
+      });
+
+      const response = await this.s3VectorsClient.send(command);
+
+      if (!response.vectors || response.vectors.length === 0) {
+        return [];
+      }
+
+      return response.vectors;
+    } catch (error) {
+      console.warn(`⚠️  S3 Vectors query failed: ${error.message}`);
+      return [];
+    }
+  }
+
   /**
    * 客户端向量搜索（回退方案）
    */

@@ -10,7 +10,10 @@
  *   npm run vectorize -- skill-name1 skill-name2  # 只处理指定 skills
  * 
  * 环境变量：
- * - OPENCLAW_SKILLS_VECTOR_BUCKET: S3 向量桶名称（必需）
+ * - OPENCLAW_SKILLS_VECTOR_BUCKET: S3 Vectors 向量桶名称（必需）
+ * - OPENCLAW_SKILLS_VECTOR_INDEX: S3 Vectors 向量索引名称（默认 skills）
+ * - OPENCLAW_SKILLS_GP_BUCKET: S3 通用桶名称（如果在该区域 S3 Vectors 服务还未上线）
+ * - OPENCLAW_SKILLS_USE_S3_VECTORS_BUCKET: 是否启用 S3 Vectors - true | false
  * - AWS_REGION: AWS 区域（默认 us-east-1）
  * - OPENCLAW_SKILLS_DIR: Skills 目录（默认 ~/.openclaw/workspace/skills）
  */
@@ -18,6 +21,7 @@
 const fs = require('fs').promises;
 const path = require('path');
 const { S3Client, PutObjectCommand, HeadObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { S3VectorsClient, PutVectorsCommand, GetVectorsCommand, ListVectorsCommand } = require('@aws-sdk/client-s3vectors');
 const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 
 // 解析命令行参数
@@ -27,21 +31,25 @@ const specificSkills = args.filter(arg => !arg.startsWith('--'));
 
 // 配置
 const SKILLS_DIR = process.env.OPENCLAW_SKILLS_DIR || path.join(process.env.HOME, '.openclaw/workspace/skills');
+const GP_BUCKET = process.env.OPENCLAW_SKILLS_GP_BUCKET || 'openclaw-skills-vectors';
 const VECTOR_BUCKET = process.env.OPENCLAW_SKILLS_VECTOR_BUCKET || 'openclaw-skills-vectors';
+const VECTOR_INDEX = process.env.OPENCLAW_SKILLS_VECTOR_INDEX || 'skills';
+const USE_S3V = process.env.OPENCLAW_SKILLS_USE_S3_VECTORS_BUCKET === 'true';
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
 const NOVA_MME_MODEL = 'amazon.nova-2-multimodal-embeddings-v1:0';
 
 // AWS 客户端
 const s3Client = new S3Client({ region: AWS_REGION });
+const s3VectorsClient = new S3VectorsClient({ region: AWS_REGION });
 const bedrockClient = new BedrockRuntimeClient({ region: AWS_REGION });
 
 /**
  * 检查 S3 中是否存在向量文件，并获取元数据
  */
-async function getExistingVector(skillName) {
+async function getExistingVectorGpBucket(skillName) {
   try {
     const response = await s3Client.send(new HeadObjectCommand({
-      Bucket: VECTOR_BUCKET,
+      Bucket: GP_BUCKET,
       Key: `skills/${skillName}.json`
     }));
     
@@ -59,6 +67,35 @@ async function getExistingVector(skillName) {
 }
 
 /**
+ * 检查 S3 Vectors 中是否存在向量文件，并获取元数据
+ */
+async function getExistingVectorS3VBucket(skillName) {
+  try {
+    const response = await s3VectorsClient.send(new GetVectorsCommand({
+      vectorBucketName: VECTOR_BUCKET,
+      indexName: VECTOR_INDEX,
+      keys: [skillName],
+      returnMetadata: true
+    }));
+
+    if (response.vectors && response.vectors.length > 0 && response.vectors[0].key) {
+      const metadata = response.vectors[0].metadata || {};
+      return {
+        exists: true,
+        vectorizedAt: metadata.vectorized_at || null,
+        metadata
+      };
+    }
+    return { exists: false };
+  } catch (error) {
+    if (error.name === 'ResourceNotFoundException' || error.$metadata?.httpStatusCode === 404) {
+      return { exists: false };
+    }
+    throw error;
+  }
+}
+
+/**
  * 检查 SKILL.md 是否被修改
  */
 async function isSkillModified(skillMdPath, existingVector) {
@@ -69,10 +106,15 @@ async function isSkillModified(skillMdPath, existingVector) {
   try {
     const stats = await fs.stat(skillMdPath);
     const localModified = stats.mtime;
-    const s3Modified = existingVector.lastModified;
+    if (USE_S3V) {
+      const vectorizedAt = new Date(existingVector.vectorizedAt);
+      return localModified > vectorizedAt;
+    } else {
+      const s3Modified = existingVector.lastModified;
     
-    // 如果本地文件比 S3 文件新，则需要更新
-    return localModified > s3Modified;
+      // 如果本地文件比 S3 文件新，则需要更新
+      return localModified > s3Modified;
+    }
   } catch (error) {
     console.error(`     ⚠️  Error checking modification time: ${error.message}`);
     return true; // 出错时保守处理，重新向量化
@@ -86,7 +128,11 @@ async function main() {
   console.log('🔄 OpenClaw Skills Vectorization v2.0');
   console.log('==========================================');
   console.log(`📁 Skills directory: ${SKILLS_DIR}`);
-  console.log(`☁️  S3 bucket: ${VECTOR_BUCKET}`);
+  if (USE_S3V) {
+    console.log(`☁️  S3 Vectors bucket: ${VECTOR_BUCKET}, index: ${VECTOR_INDEX}`);
+  } else {
+    console.log(`☁️  S3 GP bucket: ${GP_BUCKET}`);
+  }
   console.log(`🌍 AWS region: ${AWS_REGION}`);
   
   if (forceUpdate) {
@@ -152,7 +198,7 @@ async function main() {
     try {
       // 检查是否需要更新
       if (!forceUpdate) {
-        const existingVector = await getExistingVector(skillName);
+        const existingVector = USE_S3V ? await getExistingVectorS3VBucket(skillName) : await getExistingVectorGpBucket(skillName);
         
         if (existingVector.exists) {
           const modified = await isSkillModified(skillMdPath, existingVector);
@@ -189,34 +235,55 @@ async function main() {
       const vector = await getEmbedding(text);
       console.log(`   ✅ Embedding generated (${vector.length}D)`);
       
-      // 构建 S3 对象
-      const skillVector = {
-        skill_name: metadata.name,
-        description: metadata.description,
-        trigger_keywords: metadata.keywords,
-        location: skillPath,
-        vector: vector,
-        metadata: {
-          version: metadata.version || '1.0.0',
-          vectorized_at: new Date().toISOString(),
-          usage_count: 0
-        }
-      };
+      if (USE_S3V) {
+        // 存储到 S3 Vectors（原生向量索引）
+        console.log(`   ☁️  Uploading to S3 Vectors...`);
+        await s3VectorsClient.send(new PutVectorsCommand({
+          vectorBucketName: VECTOR_BUCKET,
+          indexName: VECTOR_INDEX,
+          vectors: [{
+            key: skillName,
+            data: { float32: vector },
+            metadata: {
+              skill_name: metadata.name,
+              description: metadata.description,
+              location: skillPath,
+              keywords: metadata.keywords.join(','),
+              version: metadata.version || '1.0.0',
+              vectorized_at: new Date().toISOString()
+            }
+          }]
+        }));
+      } else {
+        // 构建 S3 对象
+        const skillVector = {
+          skill_name: metadata.name,
+          description: metadata.description,
+          trigger_keywords: metadata.keywords,
+          location: skillPath,
+          vector: vector,
+          metadata: {
+            version: metadata.version || '1.0.0',
+            vectorized_at: new Date().toISOString(),
+            usage_count: 0
+          }
+        };
       
-      // 存储到 S3 Vectors
-      console.log(`   ☁️  Uploading to S3...`);
+        // 存储到 S3 Vectors
+        console.log(`   ☁️  Uploading to S3...`);
       
-      await s3Client.send(new PutObjectCommand({
-        Bucket: VECTOR_BUCKET,
-        Key: `skills/${metadata.name}.json`,
-        Body: JSON.stringify(skillVector),
-        ContentType: 'application/json',
-        Metadata: {
-          'skill-name': metadata.name,
-          'vector-dimensions': String(vector.length),
-          'vectorized-at': new Date().toISOString()
-        }
-      }));
+        await s3Client.send(new PutObjectCommand({
+          Bucket: VECTOR_BUCKET,
+          Key: `skills/${metadata.name}.json`,
+          Body: JSON.stringify(skillVector),
+          ContentType: 'application/json',
+          Metadata: {
+            'skill-name': metadata.name,
+            'vector-dimensions': String(vector.length),
+            'vectorized-at': new Date().toISOString()
+          }
+        }));
+      }
       
       console.log(`   ✅ Success!\n`);
       processedCount++;
